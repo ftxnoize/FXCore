@@ -1,0 +1,724 @@
+<library>
+	<name>g_dsp</name>
+	<desc>Basic library of routines for the FXCore DSP from Experimental Noize</desc>
+	<lib_color>28, 26, 89</lib_color>
+	<lib_text_color>255,255,255</lib_text_color>
+	<sub>
+		<name>pitch_rmp0</name>
+		<desc>pitch shifter using ramp 0, +/- 1 octave</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to shift</desc>
+		</param>
+		<param>
+			<name>shft</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>MREG to use to adjust shift ammount range 0 to 1.0</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding shifted signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Pitch shifter using ramp 0. +/- 1 octave
+			*
+			*****************************************************/
+			.mem pdelay 1024
+			cpy_cm r0, shft
+			wrdld r1, 0xC000
+			adds r0, r1
+			wrdld r0, 0xFFF0
+			multrr acc32, r0
+			jgez acc32, OK
+			sls acc32, 1
+			OK:cpy_sc ramp0_f, acc32
+			cpy_cm acc32, in
+			wrdel pdelay, acc32
+			pitch rmp0|L1024|XF0, pdelay
+			cpy_mc out, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>phaser_4stage</name>
+		<desc>4 stage phaser using an mreg to get the waveform from</desc>
+		<param>
+			<name>in_sig</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG to hold input signal to phase shifter</desc>
+		</param>
+		<param>
+			<name>LFO</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG that has the waveform to use, must range -1.0 to +1.0</desc>
+		</param>
+		<param>
+			<name>range</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG to control range</desc>
+		</param>
+		<param>
+			<name>resonance</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG to control resonance</desc>
+		</param>
+		<param>
+			<name>mix</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG to control depth(mix)</desc>
+		</param>
+		<param>
+			<name>ap1</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold first allpass filter</desc>
+		</param>
+		<param>
+			<name>ap2</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold second allpass filter</desc>
+		</param>
+		<param>
+			<name>ap3</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold third allpass filter</desc>
+		</param>
+		<param>
+			<name>ap4</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold fourth allpass filter</desc>
+		</param>
+                <param>
+			<name>feedback</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold feedback signal from phase shifter</desc>
+		</param>
+		<param>
+			<name>out_sig</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG to hold output signal from phase shifter</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Phase shifter, 4 stages, uses MREG for
+			*        phase control
+			*****************************************************/
+			cpy_cm    r0, LFO
+			sra       r0, 2			;/4 so +/-0.25
+			addsi     acc32, -0.25		;-0.25 so range -0.5 to 0 
+			cpy_cm    r0, range		;* POT 
+			multrr    r0, acc32
+			wrdld     r0, 0xC667		
+			adds      r0, acc32
+                        cpy_cc    r1, acc32
+			cpy_cm    r3, in_sig
+			cpy_cm	  r0, feedback
+			adds      r3, r0
+			sra       acc32, 6
+			apma      r1, ap1             ; AP 1
+			apmb      r1, ap1
+			apma      r1, ap2             ; AP 2
+			apmb      r1, ap2
+			apma      r1, ap3             ; AP 3
+			apmb      r1, ap3
+			apma      r1, ap4             ; AP 4
+			apmb      r1, ap4
+			sls       acc32, 6
+			subs      acc32, r3            ; acc32 = fpo - in0
+			cpy_cm    r0, mix         ; mix pot placed in r0
+			multrr    r0, acc32             ; acc32 = acc32 * mix = mix*(fpo - in0)
+			adds      acc32, r3
+			cpy_mc    out_sig, acc32             ; output it!
+			cpy_cm    r1, resonance           ; Read resonance POT
+			multrr    acc32, r1               ; Multiply the output by the feedback
+			wrdld     r0, 0x7000
+			multrr    acc32, r0             ; Multiply by limit
+			cpy_mc    feedback, acc32         ; save it in feedback for next time
+		</code>
+	</sub>
+	<sub>
+		<name>flanger</name>
+		<desc>Button flanger, press and hold the tap button to "slow" the reel, release to allow it to speed back up</desc>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output</desc>
+		</param>
+		<param>
+			<name>RateOut</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>Controls how fast the "reel" slows</desc>
+		</param>
+		<param>
+			<name>RateBack</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>Controls how fast the "reel" speeds back up</desc>
+		</param>
+		<param>
+			<name>Counter</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold counter value</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Button flanger, press and hold the tap button
+			*        to "slow" the reel, release to allow it to speed back up
+			*****************************************************/
+			.mem delay 8192
+			cpy_cm    r0, IN
+			wrdel     delay, r0
+			xor       acc32, acc32            ; clear acc32
+			ori       acc32, 0x0010           ; load a minimum value into acc32 in case pot is 0
+			cpy_cc    r0, acc32             ; save it
+			cpy_cm    acc32, RateOut 
+			multrr    acc32, acc32
+			adds      acc32, r0             ; add the minimum value
+			cpy_cc    r2, acc32               ; save it
+			cpy_cm    acc32, RateBack  
+			multrr    acc32, acc32
+			adds      acc32, r0             ; add the minimum value
+			cpy_cc    r3, acc32               ; save it
+
+			cpy_cm    r1, Counter
+			andi      flags, taplvl           ; get the tap button state
+			jnz       acc32, isnzero          ; if != 0 jump (pin has pull-up so pressed button is a 0)
+			xor       acc32, acc32            ; clear acc
+			ori       acc32, 0x0100            ; load in a small increment value
+			multrr    acc32, r2               ; multiply by out speed
+
+			adds      r1, acc32          ; add the increment to the counter
+			cpy_cc    r1, acc32          ; save it back but check it
+			wrdld     r0, 8192     ; load the max delay line length
+			subs      r0, acc32             ; maxlength - counter value
+			jgez      acc32, ango             ; if >=0 we are less than or equal to max so jump 
+			cpy_cc    r1, r0           ; if here counter > maxlength so load max length
+			jmp       ango                    ; jump over the decrement part
+			isnzero:
+			jz        r1, ango           ; if count is 0 jump to output
+			xor       acc32, acc32            ; clear acc
+			ori       acc32, 0x0100            ; load in a small increment value
+			multrr    acc32, r3               ; multiply by in speed
+			subs      r1, acc32          ; subtract the value
+			jgez      acc32, ldres            ; if >= 0 jump
+			xor       acc32, acc32            ; was lt 0 so load 0
+			ldres:
+			cpy_cc    r1, acc32          ; save to counter reg
+			ango:
+			cpy_mc    Counter, r1
+			interp    r1, delay          ; linear interp the values in the delay line
+			cpy_mc    OUT, acc32             ; write to the output
+		</code>
+	</sub>
+	<sub>
+		<name>decimator</name>
+		<desc>An under sampler/aliaser, resamples the data at a slower rate than the sample rate</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to decimate</desc>
+		</param>
+		<param>
+			<name>ratio</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG holding resample ratio relative to the sample rate, should range between 0 and 0.999, may want to use a shift and scale block to limit high and low end</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>ptr</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG pointer between samples, connect MREG to this pin</desc>
+		</param>
+		<param>
+			<name>old</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG holding old sample we are iterpolating between, connect MREG to this pin</desc>
+		</param>
+		<param>
+			<name>cur</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG holding current sample we are interpolating between, connect MREG to this pin</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Decimator, under sampler/aliaser, resamples
+			*        the data at a slower rate than the sample rate
+			*****************************************************/
+			cpy_cm	r0, ptr
+			cpy_cm	r1, old
+			cpy_cm	r2, cur
+			cpy_cm	r3, ratio
+			add	r0, r3 ; here we play a trick on the chip, doing an unsigned add means we become negative if the value exceeds 1.0
+			cpy_cc	r0, acc32
+			jgez	acc32, is_pos
+			wrdld	acc32, 0x7FFF
+			ori	acc32, 0xFFFF
+			and	acc32, r0 ; remove integer bit
+			cpy_cc	r0, acc32 ; save back to pointer
+			cpy_cc	r1, r2 ; curr to old
+			cpy_cm	r2, in ; in to cur
+			is_pos:
+			subs	r2, r1
+			multrr	r0, acc32
+			adds	r1, acc32
+			cpy_mc	out, acc32
+			; save values
+			cpy_mc	cur, r2 
+			cpy_mc	old, r1
+			cpy_mc	ptr, r0
+		</code>
+	</sub>
+	<sub>
+		<name>bit_crusher</name>
+		<desc>Masks off LSBs to get an old school/quantized sound, control ranges from 0 to 1 to mask off 8 to 23 bits</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to crush</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>control</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG with control, range 0 to 0.9999 which masks off 8 to 23 bits</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Bit crusher, MREG controlled to mask bits
+			*        
+			*****************************************************/
+			cpy_cm	r0, in
+			cpy_cm	r1, control
+			wrdld	r2, 0x7800 ; mask off upper 4 bits of control
+			and	r1, r2
+			sr	acc32, 1 ; shift to make room
+			wrdld	r1, 0x2000
+			adds	r1, acc32
+			sr	acc32, 26 ; put result into bits 4-0
+			cpy_cc	r1, acc32 ; save it			
+			wrdld	acc32, 0xFFFF ; load upper 16 bits of mask
+			ori	acc32, 0xFF00 ; load lower bits
+			slr	acc32, r1 ; shift mask into place
+			cpy_cc	r3, acc32 ; save final mask
+			; if in is negative we need to make it positive first to mask else we are increasing the
+			; amplitude of a negative number by making the bits 0
+			jgez	r0, pos_in
+			neg	r0
+			and	r3, acc32 ; mask the input
+			neg	acc32
+			jmp	outter
+			pos_in:
+			and	r0, r3 ; mask the input
+			outter:
+			cpy_mc	out, acc32 ; send to output
+		</code>
+	</sub>
+	<sub>
+		<name>Chorus_ILFO</name>
+		<desc>Chorus using one of the built in internal LFOs, wet out only so mix with dry</desc>
+		<param>
+			<name>LFO</name>
+			<side>B</side>
+			<type>CONST</type>
+			<desc>Which LFO to use from CONST library, i.e. LFO0, LFO1, etc.</desc>
+		</param>
+		<param>
+			<name>LFO_F</name>
+			<side>B</side>
+			<type>SFR</type>
+			<desc>Frequency control register from SFR library for the LFO, i.e. LFO0_F.</desc>
+		</param>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to crush</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>RATE</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG for rate, range 0 to 0.9999</desc>
+		</param>
+		<param>
+			<name>DEPTH</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>MREG for depth, range 0 to 0.9999</desc>
+		</param>
+		<param>
+			<name>FS</name>
+			<type>INT</type>
+			<desc>Integer sample rate, i.e. 32000</desc>
+		</param>
+		<param>
+			<name>F_low</name>
+			<type>DEC</type>
+			<desc>Low frequency for LFO, i.e. 0.2</desc>
+		</param>
+		<param>
+			<name>F_high</name>
+			<type>DEC</type>
+			<desc>High frequency for LFO, i.e. 10</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Chorus using one of the built in internal
+			*        LFOs, wet out only so mix with dry
+			*****************************************************/
+			.mem    delay       2048
+
+			cpy_cm  r0, RATE           ; read in frequency control pot
+			wrdld   acc32, ((2^31-1)*(2*pi()*(F_high-F_low))/FS)>>16            ; load difference between low and high frequency
+			ori     acc32, ((2^31-1)*(2*pi()*(F_high-F_low))/FS)&amp;0xffff
+			multrr  r0, acc32
+			cpy_cc  r0, acc32
+			wrdld   acc32, ((2^31-1)*(2*pi()*F_low)/FS)>>16
+			ori     acc32, ((2^31-1)*(2*pi()*F_low)/FS)&amp;0xffff
+			adds    acc32, r0
+			cpy_sc  LFO_F, acc32
+
+			cpy_cm  r0, DEPTH           ; read in depth control pot
+			wrdld   acc32, 400
+			multrr  r0, acc32
+			cpy_cc  r15, acc32
+
+			cpy_cm  r4, IN
+			wrdel   delay, r4
+
+			; voice 1
+			chr     LFO|sin, delay+1400
+			cpy_cc  r1, acc32
+
+			; voice 2
+			chr     LFO|cos, delay
+			cpy_cc  r2, acc32
+
+			; voice 3
+			chr     LFO|sin|neg, delay+1024
+			cpy_cc  r3, acc32
+
+			; voice 4
+			chr     LFO|cos|neg, delay+768
+
+			; sum the voices
+			adds    acc32, r3
+			adds    acc32, r2
+			adds    acc32, r1
+
+			; write it
+			cpy_mc  OUT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>Hilbert</name>
+		<desc>Hilbert transform works from about Fs/8 to Fs/2, amplitude lower at low (Fs/8) end</desc>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input signal</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Hilbert transform works from about Fs/8 to Fs/2
+			*        Fs/2, amplitude lower at low (Fs/8) end
+			*****************************************************/
+			.mem	hil_del	65
+			cpy_cm	r0, IN
+			wrdel	hil_del, r0
+
+			clracc64
+
+			rddel	r0, hil_del+1
+			wrdld	r1, ((2/pi())*(2^31-1))>>16
+			ori	r1, ((2/pi())*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+3
+			wrdld	r1, ((2/(pi()*3))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*3))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+5
+			wrdld	r1, ((2/(pi()*5))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*5))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+7
+			wrdld	r1, ((2/(pi()*7))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*7))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+9
+			wrdld	r1, ((2/(pi()*9))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*9))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+11
+			wrdld	r1, ((2/(pi()*11))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*11))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+13
+			wrdld	r1, ((2/(pi()*13))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*13))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+15
+			wrdld	r1, ((2/(pi()*15))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*15))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+17
+			wrdld	r1, ((2/(pi()*17))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*17))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+19
+			wrdld	r1, ((2/(pi()*19))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*19))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+21
+			wrdld	r1, ((2/(pi()*21))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*21))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+23
+			wrdld	r1, ((2/(pi()*23))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*23))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+25
+			wrdld	r1, ((2/(pi()*25))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*25))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+27
+			wrdld	r1, ((2/(pi()*27))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*27))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+29
+			wrdld	r1, ((2/(pi()*29))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*29))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+31
+			wrdld	r1, ((2/(pi()*31))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*31))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+33
+			wrdld	r1, ((2/(pi()*33))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*33))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+35
+			wrdld	r1, ((2/(pi()*35))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*35))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+37
+			wrdld	r1, ((2/(pi()*37))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*37))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+39
+			wrdld	r1, ((2/(pi()*39))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*39))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+41
+			wrdld	r1, ((2/(pi()*41))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*41))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+43
+			wrdld	r1, ((2/(pi()*43))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*43))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+45
+			wrdld	r1, ((2/(pi()*45))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*45))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+47
+			wrdld	r1, ((2/(pi()*47))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*47))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+49
+			wrdld	r1, ((2/(pi()*49))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*49))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+51
+			wrdld	r1, ((2/(pi()*51))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*51))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+53
+			wrdld	r1, ((2/(pi()*53))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*53))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+55
+			wrdld	r1, ((2/(pi()*55))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*55))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+57
+			wrdld	r1, ((2/(pi()*57))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*57))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+59
+			wrdld	r1, ((2/(pi()*59))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*59))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+61
+			wrdld	r1, ((2/(pi()*61))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*61))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rddel	r0, hil_del+63
+			wrdld	r1, ((2/(pi()*63))*(2^31-1))>>16
+			ori	r1, ((2/(pi()*63))*(2^31-1))&amp;0xffff
+			macrr	r0, acc32
+
+			rdacc64u r0
+			cpy_mc	OUT, r0
+		</code>
+	</sub>
+	<sub>
+		<name>Harmonic</name>
+		<desc>Generate an integer harmonic of an input (2x, 3x, etc), requires memory block 4096 long</desc>
+		<param>
+			<name>RAMP</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG to hold ramp wave</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output signal</desc>
+		</param>
+		<param>
+			<name>DELAY</name>
+			<side>T</side>
+			<type>MEM</type>
+			<desc>Memory block (must be 4096 long) holding the delay with the signal to generate harmonics of</desc>
+		</param>
+		<param>
+			<name>HARMONIC</name>
+			<type>INT</type>
+			<desc>Harmonic to generate, integer value of 2,3,4, etc.</desc>
+		</param>
+		<param>
+			<name>AMP</name>
+			<type>DEC</type>
+			<desc>Amplitude between 0 and 0.999</desc>
+		</param>
+		<code>
+			/*********************************************************
+			* Generate an integer harmonic (2x, 3x, 4x, etc.) of the
+			* input signal, uses external 4096 long memory block
+			**********************************************************/
+			; calculate wave
+			cpy_cm	r0, RAMP	; load in current ramp value
+			wrdld	acc32, FLOOR(ABS((HARMONIC-1) &lt;&lt;5)) ; create decrement value for this harmonic and put in a CREG, use FLOOR
+			sub	r0, acc32	; down ramp, subtract increment value
+			cpy_cc	r0, acc32
+			cpy_mc	RAMP, acc32	; save it back
+			sra	acc32, 1 	; /2
+			addsi	acc32, 0x4000	; add 1/2 so ranges 0 to 1.0
+			; shift to lower bits
+			sr	acc32, 20
+			; add delay base
+			addi	acc32, DELAY
+			; read from line and save
+			rddelx	r2, acc32
+
+			; generate second sample by adding 1/2
+			addi	r0, 0x8000
+			sra	acc32, 1 	; /2
+			addsi	acc32, 0x4000	; add 1/2 so ranges 0 to 1.0
+			; shift to lower bits
+			sr	acc32, 20
+			; add delay base
+			addi	acc32, DELAY
+			; read from line and save
+			rddelx	r3, acc32
+
+			; crossfade for samp1 is abs of wave
+			abs	r0
+			cpy_cc	r4, acc32
+			subs	r3, r2
+			multrr	acc32, r4
+			adds	r2, acc32
+			;
+			multri	acc32, AMP
+			cpy_mc	OUT, acc32
+		</code>
+	</sub>
+
+</library>

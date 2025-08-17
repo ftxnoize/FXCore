@@ -1,0 +1,1206 @@
+<library>
+	<name>g_util</name>
+	<desc>Library of utility routines for the FXCore DSP from Experimental Noize</desc>
+	<lib_color>202,255,102</lib_color>
+	<lib_text_color>0,64,0</lib_text_color>
+	<sub>
+		<name>get_sfr</name>
+		<desc>SFR in to a MREG.</desc>
+		<param>
+			<name>in</name>
+			<type>SFR</type>
+			<side>L</side>
+			<desc>SFR to read like in0, in1, pot0, etc..</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>MREG to save SFR into</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Get SFR into MREG  
+			*        
+			*****************************************************/
+			cpy_cs	r0, in
+			cpy_mc	out, r0
+		</code>
+	</sub>
+	<sub>
+		<name>put_sfr</name>
+		<desc>MREG out to an SFR.</desc>
+		<param>
+			<name>out</name>
+			<type>SFR</type>
+			<side>R</side>
+			<desc>SFR to save to like out0, etc.</desc>
+		</param>
+		<param>
+			<name>in</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>MREG to send out to SFR</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Put MREG into SFR 
+			*        
+			*****************************************************/
+			cpy_cm	r0, in
+			cpy_sc	out, r0
+		</code>
+	</sub>
+        <sub>
+		<name>mreg_2_mem</name>
+		<desc>Write MREG to head of memory.</desc>
+		<param>
+			<name>in</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>MREG input</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<type>MEM</type>
+			<side>R</side>
+			<desc>MEM block to write to</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Put MREG into memory
+			*        
+			*****************************************************/
+			cpy_cm	r0, in
+			wrdel	out, r0
+		</code>
+	</sub>
+        <sub>
+		<name>mem_2_mreg</name>
+		<desc>Read tail of memory into MREG.</desc>
+		<param>
+			<name>in</name>
+			<type>MEM</type>
+			<side>L</side>
+			<desc>Memory block to read from</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>MREG to write to</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Read memory tail into MREG
+			*        
+			*****************************************************/
+			rddel	r0, in#
+			cpy_mc	out, r0
+		</code>
+	</sub>
+	<sub>
+		<name>2_mix</name>
+		<desc>Mix 2 signals from 100% sig1/0% sig2 to 0% sig1/100% sig2 using an MREG to adjust the mix.</desc>
+		<param>
+			<name>sig1</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>First signal to mix</desc>
+		</param>
+		<param>
+			<name>sig2</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Second signal to mix</desc>
+		</param>
+		<param>
+			<name>mixcon</name>
+			<type>MREG</type>
+			<side>T</side>
+			<desc>Mix control, range 0 to 1.0, 0 means 100% sig1 and 0% sig2, 1.0 mean 0% sig1 and 100% sig2</desc>
+		</param>
+		<param>
+			<name>sigout</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Mixed signal out</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Mix 2 signals from 100% sig1/0% sig2 to   
+			*        0% sig1/100% sig2 based on MREG value
+			*****************************************************/
+			cpy_cm	r0, sig1	; get the signals and mix control
+			cpy_cm	r1, sig2
+			cpy_cm	r2, mixcon
+			multrr	r1, r2		; sig2 * mix control
+			cpy_cc	r1, acc32	; save it
+			neg	r2		; mixcon = -mixcon
+			cpy_cc	r2, acc32
+			wrdld	acc32, 0x7FFF	; put (almost) 1.0 into acc32
+			ori	acc32, 0xFFFF
+			adds	r2, acc32	; 1.0 - mixcon
+			multrr	r0, acc32	; * sig1
+			adds	r1, acc32	; + scaled sig2	
+			cpy_mc	sigout, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>Select</name>
+		<desc>Selects IN0 or IN1 based on switch</desc>
+		<param>
+			<name>IN0</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Input signal to be routed</desc>
+		</param>
+		<param>
+			<name>IN1</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Selected if switch is 1</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Output</desc>
+		</param>
+		<param>
+			<name>SW</name>
+			<type>CONST</type>
+			<side>B</side>
+			<desc>Switch mask (SW0, SW1, etc from CONST library)</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Select input based on switch   
+			*        
+			*****************************************************/
+			cpy_cs  r0, switch
+			andi	r0, SW
+			jnz	acc32, sel_s1
+			cpy_cm	r1, IN0
+			jmp	do_out
+			sel_s1: cpy_cm	r1, IN1
+			do_out: cpy_mc	OUT, r1	; output
+		</code>
+	</sub>
+	<sub>
+		<name>Route</name>
+		<desc>Routes IN to Out0 or Out1, puts out 0 on unselected output</desc>
+		<param>
+			<name>IN</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Selected if switch is 0</desc>
+		</param>
+		<param>
+			<name>OUT0</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>IN routed here if switch is 0</desc>
+		</param>
+		<param>
+			<name>OUT1</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>IN routed here if switch is 1</desc>
+		</param>
+		<param>
+			<name>SW</name>
+			<type>CONST</type>
+			<side>B</side>
+			<desc>Switch mask (SW0, SW1, etc from CONST library)</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Route to out based on switch   
+			*        
+			*****************************************************/
+			xor	acc32, acc32
+			cpy_mc	out0, acc32
+			cpy_mc	out1, acc32
+			cpy_cm	r1, IN
+			cpy_cs  r0, switch
+			andi	r0, SW
+			jnz	acc32, sel_s1
+			cpy_mc	out0, r1
+			jmp	do_out
+			sel_s1: cpy_mc	out1, r1
+			do_out: xor	acc32, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>A*control</name>
+		<desc>Multiply signal A by a value from 0 to 1 that has upper and lower limits, good for setting level of a feedback or wet signal that is then added to the dry</desc>
+		<param>
+			<name>sigA</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>First signal to mix</desc>
+		</param>
+		<param>
+			<name>control</name>
+			<type>MREG</type>
+			<side>T</side>
+			<desc>Level control, range 0 to 1.0, has high and low limit parameters</desc>
+		</param>
+		<param>
+			<name>sigout</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Mixed signal out</desc>
+		</param>
+		<param>
+			<name>high_limit</name>
+			<type>DEC</type>
+			<desc>High limit, must be higher than the low_limit and a max value of 0.9999</desc>
+			<default>0.9999</default>
+		</param>
+		<param>
+			<name>low_limit</name>
+			<type>DEC</type>
+			<desc>Low limit, must be lower than the high_limit and a min value of 0</desc>
+			<default>0</default>
+		</param>
+		<code>
+			/****************************************************
+			*        Control volume of input based on MREG with   
+			*        high and low limits
+			*****************************************************/
+			cpy_cm	r0, sigA	; get the signals and mix control
+			cpy_cm	r1, control
+			wrdld	r2, (high_limit-low_limit)*32767
+			wrdld	r3, low_limit*32767
+			multrr	r1, r2
+			adds	acc32, r3
+			multrr	r0, acc32
+			cpy_mc	sigout, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>A+B</name>
+		<desc>Add signals A and B</desc>
+		<param>
+			<name>sig1</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>First signal to mix</desc>
+		</param>
+		<param>
+			<name>sig2</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Second signal to mix</desc>
+		</param>
+		<param>
+			<name>sigout</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Mixed signal out</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Sum two inputs to output   
+			*        
+			*****************************************************/
+			cpy_cm	r0, sig1	; get the signals and mix control
+			cpy_cm	r1, sig2
+			adds	r0, r1
+			cpy_mc	sigout, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>A-B</name>
+		<desc>Subtract signal A from B</desc>
+		<param>
+			<name>IN_A</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Signal A</desc>
+		</param>
+		<param>
+			<name>IN_B</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Signal B</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>A-B</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        (A - B) => out   
+			*        
+			*****************************************************/
+			cpy_cm	r0, IN_A	; get the signals
+			cpy_cm	r1, IN_B
+			subs	r0, r1
+			cpy_mc	OUT, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>A*B</name>
+		<desc>Multiplies signals A and B</desc>
+		<param>
+			<name>sig1</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>First signal to mix</desc>
+		</param>
+		<param>
+			<name>sig2</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Second signal to mix</desc>
+		</param>
+		<param>
+			<name>sigout</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Mixed signal out</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        A*B   
+			*        
+			*****************************************************/
+			cpy_cm	r0, sig1	; get the signals
+			cpy_cm	r1, sig2
+			multrr	r0, r1
+			cpy_mc	sigout, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>scale_shift</name>
+		<desc>Scale and shift a signal to get it to a certain range.</desc>
+		<param>
+			<name>in</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Input</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Output</desc>
+		</param>
+		<param>
+			<name>scale</name>
+			<type>DEC</type>
+			<desc>Scaling factor, -1.0 to +0.9999</desc>
+			<default>0.9999</default>
+		</param>
+		<param>
+			<name>shift</name>
+			<type>DEC</type>
+			<desc>Value to add to scaled signal, -1.0 to +0.99999</desc>
+			<default>0</default>
+		</param>
+		<code>
+			/****************************************************
+			*        (IN*scale)+shift   
+			*        
+			*****************************************************/
+			cpy_cm	r0, in		; get the signal
+			multri	r0, scale
+			addsi	acc32, shift
+			cpy_mc	out, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>Invert</name>
+		<desc>Invert a signal OUT = -IN</desc>
+		<param>
+			<name>in</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Signal in</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Inverted signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        OUT = -IN   
+			*        
+			*****************************************************/
+			cpy_cm	r0, in		; get the signal
+			neg	r0
+			cpy_mc	out, acc32	; output
+		</code>
+	</sub>
+	<sub>
+		<name>lfo</name>
+		<desc>LFO, set low and high frequencies and selectable wav out with sin, tri, ramp and square. Wave ranges -1.0 to +1.0, best for 0.01 to 1000 hz range</desc>
+		<param>
+			<name>frequency</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Frequency control, ranges 0 to 1.0</desc>
+		</param>
+		<param>
+			<name>phase</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold phase counter</desc>
+		</param>
+		<param>
+			<name>wave_out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG that holds output wave selected, ranges -1.0 to +1.0</desc>
+		</param>
+		<param>
+			<name>sin</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold raw sin value</desc>
+		</param>
+		<param>
+			<name>cos</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold raw cos value</desc>
+		</param>
+		<param>
+			<name>fmin</name>
+			<type>DEC</type>
+			<desc>Minimum LFO frequency</desc>
+		</param>
+		<param>
+			<name>fmax</name>
+			<type>DEC</type>
+			<desc>Maximum LFO frequency</desc>
+		</param>
+		<param>
+			<name>Fs</name>
+			<type>DEC</type>
+			<desc>Sample rate</desc>
+		</param>
+		<param>
+			<name>sw_shift</name>
+			<type>INT</type>
+			<desc>Switches to select waveform must be next to each other, this number indicates where they are relative to SW0. So if using SW1 and SW0 then this is 0, if using SW2 and SW1 this is 1, etc.</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        LFO with sin/tri/saw out   
+			*        
+			*****************************************************/
+			; load values
+			wrdld	r0, ((2*pi()*fmax/Fs-2*pi()*fmin/Fs)*(2^31-1))>>16 // range value for sin/cos
+			ori	r0, ((2*pi()*fmax/Fs-2*pi()*fmin/Fs)*(2^31-1))&amp;0xffff
+			cpy_cc	r0, acc32
+			wrdld	r1, ((2*pi()*fmin/Fs)*(2^31-1))>>16 // min increment value for sin/cos
+			ori	r1, ((2*pi()*fmin/Fs)*(2^31-1))&amp;0xffff
+			cpy_cc	r1, acc32
+			cpy_cm	r2, phase
+			cpy_cm	r3, sin
+			cpy_cm	r4, cos
+			wrdld	r5, ((fmax-fmin)*2^32/Fs)>>16 // range value for sin/cos
+			ori	r5, ((fmax-fmin)*2^32/Fs)&amp;0xffff
+			cpy_cc	r5, acc32
+			wrdld	r6, (fmin*2^32/Fs)>>16 // min increment value for sin/cos
+			ori	r6, (fmin*2^32/Fs)&amp;0xffff
+			cpy_cc	r6, acc32
+
+			// check if sin and cos are initialized, if not set initial values
+			or	r3, r4	// are r3 and r4 both 0?
+			jnz	acc32, go // nope, jump away
+			cpy_cc	r3, acc32
+			wrdld	r4, 0x7FFF
+			ori	r4, 0xFFFF
+			cpy_cc	r4, acc32
+			go:
+			; calculate the phase increment for sin/cos
+			cpy_cm    acc32, frequency		; get control for 0 to 1 range
+			multrr    acc32, acc32			; square it
+			multrr    acc32, r0				; multiply by range
+			adds      acc32, r1          ; add r1 for min increment,NOTE non-saturated add so phase counter rolls over
+			cpy_cc	  r15, acc32			; save it for sin/cos calc
+			; now for ramp/tri/square
+			cpy_cm    acc32, frequency		; get control for 0 to 1 range
+			multrr    acc32, acc32			; square it
+			multrr    acc32, r5				; multiply by range
+			adds      acc32, r6          ; add r1 for min increment,NOTE non-saturated add so phase counter rolls over
+			add       acc32, r2            ; add current phase position, again non-saturated!
+			cpy_cc    r2, acc32            ; save new phase
+			cpy_mc	  phase, r2
+			; SINE wave
+			multrr	r4, r15		; cos*inc
+			adds	acc32, r3	; +sin
+			cpy_cc	r3, acc32
+			multrr	r3, r15		; sin*inc
+			subs	r4, acc32	; cos-sin*inc
+			cpy_mc	sin, r3
+			cpy_mc	cos, acc32
+			; select wave form
+			cpy_cs  r15, switch
+			sr	r15, sw_shift
+			andi    acc32, SW0|SW1
+			cpy_cc	r15, acc32
+			xori	r15, 0x0
+			jz	acc32, do_sin
+			xori	r15, 0x1
+			jz	acc32, do_saw
+			xori	r15, 0x2
+			jz	acc32, do_tri
+			; Square wave
+			; Either +1 or 0 based on sign of phase register
+			wrdld     acc32, 0x7FFF           ; put +1.0 into temp
+			ori	  acc32, 0xFFFF
+			jgez      r2, set_sq           ; if phase is positive jump
+			neg       acc32            ; phase was negative so make it -1
+			set_sq:
+			jmp	do_scale
+			; Sawtooth wave
+			; The phase counter register is a sawtooth so just use it
+			do_saw:
+			cpy_cc	acc32, r2	; 
+			jmp	do_scale
+			; Triangle wave
+			; We can create a triangle by taking the abs of the sawtooth (phase reg)
+			do_tri:
+			abs       r2                   ; make it a triangle from 0 to 1
+			addsi	acc32, -0.5		; now -0.5 to +0.5
+			sls	acc32, 1
+			jmp	do_scale
+			; Sin wave
+			do_sin:
+			cpy_cc	acc32, r3
+			; output result
+			do_scale:
+			cpy_mc	wave_out, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>flash_led</name>
+		<desc>Flash an LED connected to a USR pin using an MREG that ranges -1.0 to +1.0</desc>
+		<param>
+			<name>USER</name>
+			<side>R</side>
+			<type>CONST</type>
+			<desc>Which user output to flash, connect USER0 or USER1</desc>
+		</param>
+		<param>
+			<name>signal</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Which MREG to use as the source, must range -1.0 to +1.0.</desc>
+		</param>
+		<param>
+			<name>bright</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold brightness value</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Flash LED on usr pin, +/-1.0 input range   
+			*        
+			*****************************************************/
+			cpy_cs    acc32, samplecnt        ; Get the sample counter
+			andi      acc32, 0xFF             ; Mask b[7:0]
+			jnz       acc32, doPWM            ;
+
+			; Reload new PWM value from LFO into "bright"
+			cpy_cm    r0, signal                 ; read in LFO wave ranges -1.0 to +1.0 (well, almost)
+			sra       r0, 1                   ; /2 to +/- 1/2
+			addsi     acc32, 0.5              ; ranges 0 to 1
+			sra       acc32, 23                  ; shift the PWM value in place
+			cpy_mc    bright, acc32           ; save it
+
+			doPWM:
+			cpy_cm	  r0, bright
+			addi      r0, -1                  ; subtract 1 from on count
+			cpy_mc    bright, acc32           ; Save updated "bright"
+			xor       acc32, acc32            ; Clear acc32 for the LED off case
+			jneg      r0, doLED               ;
+			ori       acc32, 1                ; Set acc32[0] for the LED on case
+
+			doLED:
+			set       USER|0, acc32          ; set the usr output per the acc32 LSB
+		</code>
+	</sub>
+	<sub>
+		<name>flash_led_0_1</name>
+		<desc>Flash an LED connected to a USR pin using an MREG that ranges 0 to 1</desc>
+		<param>
+			<name>USER</name>
+			<side>R</side>
+			<type>CONST</type>
+			<desc>Which user output to flash, connect USER0 or USER1</desc>
+		</param>
+		<param>
+			<name>signal</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Which MREG to use as the source, must range 0 to +1.0.</desc>
+		</param>
+		<param>
+			<name>bright</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG to hold brightness value</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Flash LED on usr pin, 0 to 1.0 input range   
+			*        
+			*****************************************************/
+			cpy_cs    acc32, samplecnt        ; Get the sample counter
+			andi      acc32, 0xFF             ; Mask b[7:0]
+			jnz       acc32, doPWM            ;
+
+			; Reload new PWM value from LFO into "bright"
+			cpy_cm    r0, signal                 ; read in LFO wave ranges 0 to +1.0 (well, almost)
+			sra       r0, 23                  ; shift the PWM value in place
+			cpy_mc    bright, acc32           ; save it
+
+			doPWM:
+			cpy_cm	  r0, bright
+			addi      r0, -1                  ; subtract 1 from on count
+			cpy_mc    bright, acc32           ; Save updated "bright"
+			xor       acc32, acc32            ; Clear acc32 for the LED off case
+			jneg      r0, doLED               ;
+			ori       acc32, 1                ; Set acc32[0] for the LED on case
+
+			doLED:
+			set       USER|0, acc32          ; set the usr output per the acc32 LSB
+		</code>
+	</sub>
+	<sub>
+		<name>sin2f</name>
+		<desc>Given a SIN and COS wave input generate a SIN wave at twice the frequency</desc>
+		<param>
+			<name>SIN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>SIN wave input</desc>
+		</param>
+		<param>
+			<name>COS</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>COS wave input</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG to put calculated double frequency sin wave</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Given a SIN and COS wave input generate a    
+			*        SIN wave at twice the frequency
+			*****************************************************/
+			cpy_cm	r0, SIN
+			cpy_cm	r1, COS
+			multrr	r0, r1
+			sls	acc32, 1
+			cpy_mc	out, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>divide</name>
+		<desc>Divide function: A/B = C note that A MUST be less than B and both A and B will be treated as positive numbers</desc>
+		<param>
+			<name>A</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>The dividend or top number</desc>
+		</param>
+		<param>
+			<name>B</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>The divisor or bottom number</desc>
+		</param>
+		<param>
+			<name>C</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>The quotient or result</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Divide function: A/B = C note that A MUST be     
+			*        less than B and both A and B will be treated as positive numbers
+			*****************************************************/
+			cpy_cm	r0, A
+			cpy_cm	r1, B
+			log2	r0
+			cpy_cc	r0, acc32
+			log2	r1
+			cpy_cc	r1, acc32
+			subs	r0, r1
+			exp2	acc32
+			cpy_mc	C, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>nth_root</name>
+		<desc>Find the Nth root of a number, N is an integer so for square root N=2, for cube root N=3, etc.the number will be treated as a positivre number</desc>
+		<param>
+			<name>A</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>The number we want the Nth root of, will be treated as a positive value</desc>
+		</param>
+		<param>
+			<name>R</name>
+			<side>L</side>
+			<type>INT</type>
+			<desc>The root we want, square root = 2, cube root = 3, etc.</desc>
+		</param>
+		<param>
+			<name>RESULT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>The result</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Find the Nth root of a number, N is an integer     
+			*        
+			*****************************************************/
+			cpy_cm	r0, A
+			cpy_cm	r1, R
+			log2	r0
+			multri	acc32, (1/R)
+			exp2	acc32
+			cpy_mc	RESULT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>sgn</name>
+		<desc>The SGN or SIGN function, if IN less than 0 then OUT=-1, if IN=0 then out=0, if IN greater than 0 then OUT=+1</desc>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input signal</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Result of -1, 0 or +1 depending on sign and value of IN</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        The SGN or SIGN function     
+			*        
+			*****************************************************/
+			cpy_cm	r0, IN
+			jnz	r0, not_zero
+			xor	acc32, acc32
+			jmp	outter
+			not_zero: jneg	r0, negative
+			wrdld	acc32, 0x7FFF
+			ori	acc32, 0xFFFF
+			jmp	outter
+			negative:
+			wrdld	acc32, 0x8000
+			ori	acc32, 0x0000
+			outter: cpy_mc	OUT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>sin_offset</name>
+		<desc>Given a SIN and COS wave input generate a SIN wave at the same frequency but offset from SIN by some number of degrees. OFFSET spans 0 to 1, RANGE of 0 means +90 to -90, RANGE of 1 means -90 to -270</desc>
+		<param>
+			<name>SIN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>SIN wave input</desc>
+		</param>
+		<param>
+			<name>COS</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>COS wave input</desc>
+		</param>
+		<param>
+			<name>OFFSET</name>
+			<side>T</side>
+			<type>MREG</type>
+			<desc>Offset control, ranges 0 to 1 corresponding to a +90 to -90/-90 to -270 offset</desc>
+		</param>
+		<param>
+			<name>RANGE</name>
+			<type>INT</type>
+			<desc>Switch to use for range control, 0 means SW0, 1 means SW1, etc.</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG to put calculated offset sin wave</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Given a SIN and COS wave input generate a SIN      
+			*        wave at the same frequency but offset from SIN by some number of degrees
+			*****************************************************/
+			cpy_cm	r0, OFFSET		;
+			cpy_cm	r1, SIN			; SIN(a)
+			cpy_cm	r2, COS			; COS(a)
+			addsi	r0, -0.5		; -0.5 to +0.5
+			sls	acc32, 1		; *2 so -1.0 to +1.0
+			cpy_cc	r0, acc32		; -1 to +1, this is SIN(b)
+			wrdld	r3, 0x7FFF		; load up 1.0 into r3
+			ori	r3, 0xFFFF
+			cpy_cc	r3, acc32
+			multrr	r0, r0			; SIN(b)^2
+			subs	r3, acc32		; 1 - SIN(b)^2
+			log2	acc32			; square root of acc32
+			sra	acc32, 1
+			exp2	acc32			; COS(b)
+			cpy_cc	r4, acc32
+			cpy_cs  r15, switch
+			sr	r15, RANGE
+			andi    acc32, SW0
+			jz	acc32, outter
+			neg	r4
+			cpy_cc	r4, acc32
+			outter: multrr	r1, r4		; SIN(a) * COS(b)
+			cpy_cc	r5, acc32
+			multrr	r2, r0			; COS(a) * SIN(b)
+			adds	r5, acc32
+			cpy_mc	OUT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>env_follow</name>
+		<desc>Envelope follower, RMS</desc>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input signal to extract envelope from</desc>
+		</param>
+		<param>
+			<name>ENVLP</name>
+			<side>B</side>
+			<type>MREG</type>
+			<desc>MREG for internal low pass filter</desc>
+		</param>
+		<param>
+			<name>K</name>
+			<type>DEC</type>
+			<desc>LP coefficient, typically very small like 0.001</desc>
+			<default>0.0001</default>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Envelope output</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Envelope follower, RMS      
+			*        
+			*****************************************************/
+			cpy_cm    R1, IN
+			cpy_cm    R2, ENVLP
+			wrdld     R0, (K*(2^31-1))>>16       ; load in lp coefficient
+			ori       R0, (K*(2^31-1))&amp;0xffff
+			cpy_cc    R0, acc32               ; coeff in R0 now
+			multrr    R1, R1                  ; square the signal
+			subs      acc32, R2               ; in - lp
+			multrr    acc32, R0               ; *K
+			adds      acc32, R2               ; + lp
+			cpy_mc    ENVLP, acc32            ; save to lp
+			; square root
+			log2      acc32                   ; log2
+			sra       acc32, 1                ; /2 to take square root
+			exp2      acc32                   ; and back to linear
+			cpy_mc    OUT, acc32 
+		</code>
+	</sub>
+	<sub>
+		<name>SIG*A*X^B</name>
+		<desc>Raise X to the B power and multiply by A, A and B can be decimal but each must be smaller than the value from the associated shift, see app note AN-9 for more info</desc>
+		<param>
+			<name>CON_IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input signal to use for X, will be made positive only if it is a =/- value</desc>
+		</param>
+		<param>
+			<name>SIG_IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input audio signal</desc>
+		</param>
+		<param>
+			<name>A</name>
+			<type>DEC</type>
+			<desc>The multiplier value</desc>
+			<default>1</default>
+		</param>
+		<param>
+			<name>A_shift</name>
+			<type>INT</type>
+			<desc>The number of bits to shift for A, integer value, 0 is legal</desc>
+			<default>1</default>
+		</param>
+		<param>
+			<name>B</name>
+			<type>DEC</type>
+			<desc>The exponent value</desc>
+			<default>1</default>
+		</param>
+		<param>
+			<name>B_shift</name>
+			<type>INT</type>
+			<desc>The number of bits to shift for B, integer value, 0 is legal</desc>
+			<default>1</default>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output audio signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        IN*(A&lt;&lt;A_shift)*(X^(B&lt;&lt;B_shift))      
+			*        
+			*****************************************************/
+			wrdld     R0, (A/(2^A_shift))*(2^31-1)>>16       ; load in A value scaled
+			ori       R0, (A/(2^A_shift))*(2^31-1)&amp;0xffff
+			cpy_cc    R0, acc32               ; coeff in R0 now
+			wrdld     R1, (B/(2^B_shift))*(2^31-1)>>16       ; load in B value scaled
+			ori       R1, (B/(2^B_shift))*(2^31-1)&amp;0xffff
+			cpy_cc    R1, acc32               ; coeff in R1 now
+			cpy_cm    R2, CON_IN
+			cpy_cm    R3, SIG_IN
+			log2      R2
+			multrr    acc32, R1
+			sls       acc32, B_shift
+			exp2      acc32
+			multrr    acc32, R0
+			multrr    acc32, R3
+			sls       acc32, A_shift
+			cpy_mc    OUT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>MACH_6</name>
+		<desc>Multiply and accumulate 6 values and their coefficients, coefficients are the "2" input and shifted right 3 bits to allow headroom while accumulating
+OUT=(IN_A1*IN_A2)+(IN_B1*IN_B2)+...+(IN_F1*IN_F2)</desc>
+		<param>
+			<name>IN_A1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for A</desc>
+		</param>
+		<param>
+			<name>IN_A2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for A</desc>
+		</param>
+		<param>
+			<name>IN_B1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for B</desc>
+		</param>
+		<param>
+			<name>IN_B2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for B</desc>
+		</param>
+		<param>
+			<name>IN_C1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for C</desc>
+		</param>
+		<param>
+			<name>IN_C2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for C</desc>
+		</param>
+		<param>
+			<name>IN_D1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for D</desc>
+		</param>
+		<param>
+			<name>IN_D2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for D</desc>
+		</param>
+		<param>
+			<name>IN_E1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for E</desc>
+		</param>
+		<param>
+			<name>IN_E2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for E</desc>
+		</param>
+		<param>
+			<name>IN_F1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input value for F</desc>
+		</param>
+		<param>
+			<name>IN_F2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input coefficient for F</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output audio signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Multiply and accumulate 6 values and their coefficients      
+			*        
+			*****************************************************/
+			clracc64
+			cpy_cm	r0, IN_A1
+			cpy_cm	r1, IN_A2
+			machrr  r0, r1
+			cpy_cm	r0, IN_B1
+			cpy_cm	r1, IN_B2
+			machrr  r0, r1
+			cpy_cm	r0, IN_C1
+			cpy_cm	r1, IN_C2
+			machrr  r0, r1
+			cpy_cm	r0, IN_D1
+			cpy_cm	r1, IN_D2
+			machrr  r0, r1
+			cpy_cm	r0, IN_E1
+			cpy_cm	r1, IN_E2
+			machrr  r0, r1
+			cpy_cm	r0, IN_F1
+			cpy_cm	r1, IN_F2
+			machrr  r0, r1
+			sat64   r0
+			cpy_mc  OUT, r0
+		</code>
+	</sub>
+	<sub>
+		<name>SUM_3</name>
+		<desc>Accumulate 3 values shifted right 3 bits to allow headroom while accumulating, value is normalized after accumulation</desc>
+		<param>
+			<name>IN_1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 1</desc>
+		</param>
+		<param>
+			<name>IN_2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 2</desc>
+		</param>
+		<param>
+			<name>IN_3</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 3</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output audio signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Multiply and accumulate 3 values and their coefficients      
+			*        
+			*****************************************************/
+			clracc64
+			cpy_cm	r0, IN_1
+			cpy_cm	r1, IN_2
+			cpy_cm	r2, IN_3
+			macri  r0, 0.125
+			macri  r1, 0.125
+			macri  r2, 0.125
+			sat64   r0
+			cpy_mc  OUT, r0
+		</code>
+	</sub>
+	<sub>
+		<name>SUM_4</name>
+		<desc>Accumulate 4 values shifted right 3 bits to allow headroom while accumulating, value is normalized after accumulation</desc>
+		<param>
+			<name>IN_1</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 1</desc>
+		</param>
+		<param>
+			<name>IN_2</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 2</desc>
+		</param>
+		<param>
+			<name>IN_3</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 3</desc>
+		</param>
+		<param>
+			<name>IN_4</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>Input 4</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>Output audio signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Multiply and accumulate 4 values and their coefficients      
+			*        
+			*****************************************************/
+			clracc64
+			cpy_cm	r0, IN_1
+			cpy_cm	r1, IN_2
+			cpy_cm	r2, IN_3
+			cpy_cm	r3, IN_4
+			macri  r0, 0.125
+			macri  r1, 0.125
+			macri  r2, 0.125
+			macri  r3, 0.125
+			sat64   r0
+			cpy_mc  OUT, r0
+		</code>
+	</sub>
+</library>

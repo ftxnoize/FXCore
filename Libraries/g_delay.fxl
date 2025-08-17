@@ -1,0 +1,263 @@
+<library>
+	<name>g_delay</name>
+	<desc>Basic library of delay routines for the FXCore DSP from Experimental Noize</desc>
+	<lib_color>162, 0, 255</lib_color>
+	<lib_text_color>255,255,255</lib_text_color>
+	<sub>
+		<name>tap_delay</name>
+		<desc>Tap tempo delay, use switches to select /1, /2 /3 or /4 for quarter, 8th, triplet or 16th</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to delay</desc>
+		</param>
+		<param>
+			<name>delay_len</name>
+			<type>INT</type>
+			<desc>Delay length 0 to 32767</desc>
+		</param>
+		<param>
+			<name>sw_shft</name>
+			<type>INT</type>
+			<desc>This block requires 2 switches next to each other, set the number of the lower switch (i.e 0 means use SW0 and SW1)</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding delayed signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Tap tempo delay with divide
+			*
+			*****************************************************/
+			.mem      delay     delay_len
+			cpy_cs    r0, taptempo
+			sl        r0, 16
+			cpy_cc    r0, acc32
+			cpy_cs    r1, switch
+			sr        r1, sw_shft
+			andi      acc32, sw0|sw1
+			jz        acc32, go_delay
+			addi      acc32, 0xFFFF
+			jnz       acc32, div3
+			multri    r0, 0.5
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div3: addi      acc32, 0xFFFF
+			jnz       acc32, div4
+			multri    r0, 0.333333
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div4: multri    r0, 0.25
+			cpy_cc    r0, acc32
+			go_delay: interp    r0, delay
+			cpy_mc    OUT, acc32
+			cpy_cm    acc32, IN
+			wrdel     delay, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>con_delay</name>
+		<desc>Controlled delay could be POT, LFO, etc, use switches to select /1, /2 /3 or /4 for quarter, 8th, triplet or 16th</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding signal to delay</desc>
+		</param>
+		<param>
+			<name>delay_len</name>
+			<type>INT</type>
+			<desc>Delay length 0 to 32767</desc>
+		</param>
+		<param>
+			<name>delay_control</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG that controls delay time, ranges 0 to 0.999</desc>
+		</param>
+		<param>
+			<name>sw_shft</name>
+			<type>INT</type>
+			<desc>This block requires 2 switches next to each other, set the number of the lower switch (i.e 0 means use SW0 and SW1)</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding delayed signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        MREG controlled delay with divide
+			*
+			*****************************************************/
+			.mem      delay     delay_len
+			xor       acc32, acc32
+			wrdel     delay, acc32
+			cpy_cm    r0, delay_control
+			wrdld     r1, delay!
+			multrr    r0, r1
+			cpy_cc    r0, acc32
+			cpy_cs    r1, switch
+			sr        r1, sw_shft
+			andi      acc32, sw0|sw1
+			jz        acc32, go_delay
+			addi      acc32, 0xFFFF
+			jnz       acc32, div3
+			multri    r0, 0.5
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div3: addi      acc32, 0xFFFF
+			jnz       acc32, div4
+			multri    r0, 0.3333
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div4: multri    r0, 0.25
+			cpy_cc    r0, acc32
+			go_delay: interp    r0, delay
+			cpy_mc    OUT, acc32
+			cpy_cm    acc32, IN
+			wrdel     delay, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>con_delay_sh</name>
+		<desc>Controlled delay could be POT, LFO, etc, use switches to select /1, /2 /3 or /4 for quarter, 8th, triplet or 16th. Memory block is external to this sub so it can be shared among blocks</desc>
+		<param>
+			<name>delay</name>
+			<side>T</side>
+			<type>MEM</type>
+			<desc>Memory block to read from, we never write to it from here</desc>
+		</param>
+		<param>
+			<name>delay_control</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG that controls delay time, ranges 0 to 0.999</desc>
+		</param>
+		<param>
+			<name>sw_shft</name>
+			<type>INT</type>
+			<desc>This block requires 2 switches next to each other, set the number of the lower switch (i.e 0 means use SW0 and SW1)</desc>
+		</param>
+		<param>
+			<name>out</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding delayed signal</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        MREG controlled delay with divide
+			*        Uses memory block external to this block
+			*****************************************************/
+			cpy_cm    r0, delay_control
+			wrdld     r1, delay!
+			multrr    r0, r1
+			cpy_cc    r0, acc32
+			cpy_cs    r1, switch
+			sr        r1, sw_shft
+			andi      acc32, sw0|sw1
+			jz        acc32, go_delay
+			addi      acc32, 0xFFFF
+			jnz       acc32, div3
+			multri    r0, 0.5
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div3: addi      acc32, 0xFFFF
+			jnz       acc32, div4
+			multri    r0, 0.3333
+			cpy_cc    r0, acc32
+			jmp       go_delay
+			div4: multri    r0, 0.25
+			cpy_cc    r0, acc32
+			go_delay: interp    r0, delay
+			cpy_mc    OUT, acc32
+		</code>
+	</sub>
+	<sub>
+		<name>Delay_6_tap</name>
+		<desc>1664 tap long delay line, 6 taps at specific points</desc>
+		<param>
+			<name>IN</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding input</desc>
+		</param>
+		<param>
+			<name>Out_1</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>Out_2</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>Out_3</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>Out_4</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>Out_5</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<param>
+			<name>Out_6</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding result</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        6 tap delay with fixed read points
+			*
+			*****************************************************/
+			.mem    delay       1664
+
+			cpy_cm  r0, IN
+			wrdel   delay, r0
+
+			; tap 1
+			rddel   r0, delay+198
+			cpy_mc  Out_1, r0
+
+			; tap 2
+			rddel	r0, delay+331
+			cpy_mc  Out_2, r0
+
+			; tap 3
+			rddel	r0, delay+597
+			cpy_mc  Out_3, r0
+
+			; tap 4
+			rddel	r0, delay+863
+			cpy_mc  Out_4, r0
+
+			; tap 5
+			rddel	r0, delay+1395
+			cpy_mc  Out_5, r0
+
+			; tap 6
+			rddel	r0, delay+1664
+			cpy_mc  Out_6, r0
+
+		</code>
+	</sub>
+</library>

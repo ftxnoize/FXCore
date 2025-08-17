@@ -1,0 +1,30 @@
+<library>
+	<name>g_headers</name>
+	<desc>Basic library of headers to set defaults for the FXCore DSP from Experimental Noize</desc>
+	<lib_color>162, 0, 255</lib_color>
+	<lib_text_color>255,255,255</lib_text_color>
+	<sub>
+		<name>48K_default</name>
+		<desc>Example that sets a Variable Fs to 48000 and some default values for POT filters, no pins</desc>
+		<param>
+			<name>Sample_rate</name>
+			<type>int</type>
+			<desc>Sample rate, 48K default, can be referenced in ANY other lib as Fs</desc>
+			<default>48000</default>
+		</param>
+		<code>
+			/****************************************************
+			*        Header default values
+			*
+			*****************************************************/
+			.equ	  Fs    Sample_rate
+			.equ	  pi    pi()
+			.equ      e     exp(1)
+			.sreg	  POT0_K  2
+			.sreg	  POT1_K  2
+			.sreg	  POT2_K  2
+			.sreg	  POT3_K  2
+			.sreg	  POT4_K  2
+		</code>
+	</sub>
+</library>

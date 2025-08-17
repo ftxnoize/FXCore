@@ -1,0 +1,46 @@
+<library>
+	<name>g_filter_Fs</name>
+	<desc>Library of common filters for fixed frequency and passed Fs for FXCore DSP from Experimental Noize</desc>
+	<lib_color>102, 52, 76</lib_color>
+	<lib_text_color>255,255,255</lib_text_color>
+	<sub>
+		<name>lp_hp</name>
+		<desc>IIR low pass and high pass filter using MREGs for in, out and a fixed frequency -3db. Fs/pi/e must be defined in a header block</desc>
+		<param>
+			<name>in</name>
+			<side>L</side>
+			<type>MREG</type>
+			<desc>MREG holding input signal</desc>
+		</param>
+		<param>
+			<name>f</name>
+			<type>DEC</type>
+			<desc>-3db frequency</desc>
+		</param>
+		<param>
+			<name>hp</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding high pass output</desc>
+		</param>
+		<param>
+			<name>lp</name>
+			<side>R</side>
+			<type>MREG</type>
+			<desc>MREG holding low pass output</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        IIR low pass and high pass filter using MREGs 
+			*        for in, out. Set f to -3db freq, pi, e and Fs must be set in a header block
+			*****************************************************/
+			cpy_cm	r0, lp
+			cpy_cm	r1, in
+			subs	r1, r0		; HP = in - LP
+			cpy_mc	hp, acc32	; save HP
+			multri	acc32, 1-exp(1)^(-2*pi()*f/fs)	; *k
+			adds	r0, acc32	; LP + (in-LP)*K
+			cpy_mc	lp, acc32	; save it
+		</code>
+	</sub>
+</library>

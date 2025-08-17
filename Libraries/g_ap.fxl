@@ -1,0 +1,45 @@
+<library>
+	<name>g_ap</name>
+	<desc>Library of all-pass stuctures for the FXCore DSP from Experimental Noize</desc>
+	<lib_color>202,255,102</lib_color>
+	<lib_text_color>0,64,0</lib_text_color>
+	<sub>
+		<name>ap_ra</name>
+		<desc>Allpass using MREG for the delay element and an adjustable coefficient source.</desc>
+		<param>
+			<name>IN</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Input signal to the allpass</desc>
+		</param>
+		<param>
+			<name>COEFF</name>
+			<type>MREG</type>
+			<side>L</side>
+			<desc>Coefficient input</desc>
+		</param>
+		<param>
+			<name>DEL</name>
+			<type>MREG</type>
+			<side>B</side>
+			<desc>MREG for delay</desc>
+		</param>
+		<param>
+			<name>OUT</name>
+			<type>MREG</type>
+			<side>R</side>
+			<desc>Output from the allpass</desc>
+		</param>
+		<code>
+			/****************************************************
+			*        Allpass using MREG for the delay element
+			*
+			*****************************************************/
+			cpy_cm	acc32, IN
+			cpy_cm	r0, COEFF
+			APMA	r0, DEL
+			APMB	r0, DEL
+			cpy_mc	OUT, acc32
+		</code>
+	</sub>
+</library>
