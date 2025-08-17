@@ -1,0 +1,300 @@
+/******************************************
+*
+*		The Harmonic Haggis - By Experimental Noise
+*		Generate 2nd, 3rd, 4th, 5th and 6th harmonics
+*		Add a chorus and put through a tremolo
+*		Then finally an envelope follower
+*		POT0 : Chorus speed
+*		POT1 : Chorus depth
+*		POT2 : Tremolo speed
+*		POT3 : Tremolo depth
+*
+*******************************************/
+
+.rn		inc		r0
+.rn		wave	r1
+.rn		offset	r2
+.rn		waveoff	r3
+.rn		samp0	r4
+.rn		samp1	r5
+.rn		temp	r6
+.rn		signal	r7
+
+.rn		ENVLP	mr0
+.rn		wave_1	mr1
+.rn		inc_1	mr2
+.rn		wave_2	mr3
+.rn		inc_2	mr4
+.rn		wave_3	mr5
+.rn		inc_3	mr6
+.rn		wave_4	mr7
+.rn		inc_4	mr8
+.rn		wave_5	mr9
+.rn		inc_5	mr10
+.rn		amp_1	mr11
+.rn		amp_2	mr12
+.rn		amp_3	mr13
+.rn		amp_4	mr14
+.rn		amp_5	mr15
+
+; envelope follower coefficient, typically between 0.0001 and 0.1
+.equ	K		0.001
+
+
+.mem	delay1	4096	; delay line for harmonic generation
+.mem	chr_del	1024	; delay line for chorus
+
+; coefficients to generate harmonics, do not change
+.mreg	inc_1	0x00200000	; 2nd harmonic (2x)
+.mreg	inc_2	0x00400000	; 3rd harmonic (3x)
+.mreg	inc_3	0x00600000	; 4th harmonic (4x)
+.mreg	inc_4	0x00800000	; 5nd harmonic (5x)
+.mreg	inc_5	0x00a00000	; 6th harmonic (6x)
+
+; the following adjust the amplitude of the associated harmonic so change these to change sound
+.mreg	amp_1	0.70794578	; -3db
+.mreg	amp_2	0.5			; -6db
+.mreg	amp_3	0.70794578	; -3db
+.mreg	amp_4	0.00025119	; -72db
+.mreg	amp_5	0.35481339	; -9db
+
+; needed to calculate harmonics, do not change
+.creg	offset	0x40000000
+.creg	waveoff	0x80000000
+
+; chorus values, also used for vibrato for frequency, depths are different
+.equ	fs	48000
+.equ	flow .2
+.equ	fhigh 10
+.equ	clow (2^31 - 1) * (2*pi()*flow)/fs
+.equ	chigh (2^31 - 1) * (2*pi()*fhigh)/fs
+.equ	cdiff chigh - clow
+.equ	depth	100
+
+; get and store delay
+cpy_cs	acc32, in0
+wrdel	delay1, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 1
+cpy_cm	wave, wave_1
+cpy_cm	inc, inc_1
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_1, acc32	; save it back
+sra		acc32, 1 		; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+; shift to lower bits
+sr		acc32, 20
+; add delay base
+addi	acc32, delay1
+; read from line and save
+rddelx	samp0, acc32
+
+; generate second sample by adding 1/2
+add		wave, waveoff
+sra		acc32, 1 		; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+; shift to lower bits
+sr		acc32, 20
+; add delay base
+addi	acc32, delay1
+; read from line and save
+rddelx	samp1, acc32
+
+; crossfade for samp1 is abs of wave
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+;
+cpy_cm	temp, amp_1
+multrr	temp, acc32
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+
+; calculate wave 2
+cpy_cm	wave, wave_2
+cpy_cm	inc, inc_2
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_2, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+cpy_cm	temp, amp_2
+multrr	temp, acc32
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 3
+cpy_cm	wave, wave_3
+cpy_cm	inc, inc_3
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_3, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+cpy_cm	temp, amp_3
+multrr	temp, acc32
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 4
+cpy_cm	wave, wave_4
+cpy_cm	inc, inc_4
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_4, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+cpy_cm	temp, amp_4
+multrr	temp, acc32
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 5
+cpy_cm	wave, wave_5
+cpy_cm	inc, inc_5
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_5, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+cpy_cm	temp, amp_5
+multrr	temp, acc32
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+/****************************
+*		Chorus the result
+*****************************/
+wrdel	chr_del, signal
+
+cpy_cs	temp, pot0_smth  // read in frequency control pot
+wrdld	acc32, cdiff>>16     // load difference between low and high frequency
+ori		acc32, cdiff&0xffff
+multrr	temp, acc32         // pot0 * cdiff
+cpy_cc	temp, acc32
+wrdld	acc32, clow>>16      // load low freq coeff
+ori		acc32, clow&0xffff
+adds	acc32, temp         // add low freq
+cpy_sc	lfo0_f, acc32  // write to lfo0 frequency control
+
+cpy_cs	temp, pot1_smth  // read in depth control pot
+wrdld	acc32, 100
+multrr	temp, acc32
+cpy_cc	r15, acc32
+
+cpy_cs	temp, pot1_smth  // read in depth control pot
+wrdld	acc32, depth
+multrr	temp, acc32
+cpy_cc	r15, acc32
+
+chr lfo0|sin, chr_del
+
+cpy_cc	signal, acc32
+
+/******************************
+*		Now a little tremolo
+*******************************/
+cpy_cs	temp, pot2_smth  // read in frequency control pot
+wrdld	acc32, cdiff>>16     // load difference between low and high frequency
+ori		acc32, cdiff&0xffff
+multrr	temp, acc32         // pot0 * cdiff
+cpy_cc	temp, acc32
+wrdld	acc32, clow>>16      // load low freq coeff
+ori		acc32, clow&0xffff
+adds	acc32, temp         // add low freq
+cpy_sc	lfo1_f, acc32  // write to lfo0 frequency control
+
+cpy_cs	temp, pot3_smth
+cpy_cs	acc32, lfo1_s
+sra		acc32, 1
+adds	acc32, offset
+multrr	acc32, temp
+cpy_cc	temp, acc32
+wrdld	acc32, 0x7fff
+ori		acc32, 0xffff
+subs	acc32, temp
+multrr	acc32, signal
+cpy_cc	signal, acc32
+
+/****************************************************
+*        Envelope follower, RMS      
+*        We use the raw input as the control
+*****************************************************/
+cpy_cs    samp0, in0
+cpy_cm    samp1, ENVLP
+wrdld     temp, (K*(2^31-1))>>16       ; load in lp coefficient
+ori       temp, (K*(2^31-1))&0xffff
+cpy_cc    temp, acc32               ; coeff in R0 now
+multrr    samp0, samp0                  ; square the signal
+subs      acc32, samp1               ; in - lp
+multrr    acc32, temp               ; *K
+adds      acc32, samp1               ; + lp
+cpy_mc    ENVLP, acc32            ; save to lp
+; square root
+log2      acc32                   ; log2
+sra       acc32, 1                ; /2 to take square root
+exp2      acc32                   ; and back to linear
+multrr	signal, acc32
+
+cpy_sc	out0, acc32
