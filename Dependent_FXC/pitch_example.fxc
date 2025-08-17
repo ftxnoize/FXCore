@@ -1,0 +1,4 @@
+@g_util.get_sfr(IN0,MR0)
+@g_util.get_sfr(POT0_SMTH,MR2)
+@g_dsp.pitch_rmp0(MR0,MR2,MR1)
+@g_util.put_sfr(OUT0,MR1)
