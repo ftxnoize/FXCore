@@ -1,0 +1,475 @@
+/******************************************
+*
+*		Ogre - By Experimental Noize
+*		Generate -1, +1, +2, +3, +4 and +5 octaves -> rotary speaker emulator
+*		POT adjust each shift amplitude from -inf (at 0) to +10db (at 100%), POT at 50% is +0db
+*		POT0 : -1 octave level
+*		POT1 : +1 octave level
+*		POT2 : +2 octave level
+*		POT3 : +3 octave level
+*		POT4 : +4 octave level
+*		POT5 : +5 octave level
+*		
+*		Input source is passed at no change in volume and added to the output of the shifted signal
+*
+*******************************************/
+
+; some variables for the system you may need to change 
+.equ	fs			48000	; sample rate board/pedal is running at
+.equ	f_rotary	7		; how fast the rotor is turning
+.equ	dhratio		0.85	; ratio between rotor and drum speed
+.equ	dry			0.5		; dry signal level, range from 0 to 0.99999
+
+; below here should not need to change unless you are making change to the effect, all Fs dependent parameters are calculated at assemble time
+
+; wet signal level, basically 1.0-dry
+.equ	wet			0.99999-dry	; wet signal level, basically 1.0-dry
+
+; 2-pole xover parameters
+.equ	g		1.0
+.equ	p		2^0.5	; SQRT(2.0)
+.equ	fc		800 ; xover frequency -3db point
+; calculate w0 and dw0 for lp and hpdw0 for HP
+.equ	w0		fc/fs
+.equ	dw0		TAN(PI()*w0)
+.equ	hpdw0	1/TAN(PI()*w0)
+; low-pass
+.equ	pa0l	(g*dw0^2/(1 + p*dw0 + g*dw0^2))
+.equ	pa1l	2*pa0l
+.equ	pa2l	pa0l
+.equ	pb1l	2*pa0l*(1/(g*dw0^2)-1)
+.equ	pb2l	1.0-(pa0l+pa1l+pa2l+pb1l)
+; now scale them by 0.5 as some of the coefficients are > 1.0 so scale and compensate when doing the filter below
+; also converting to integer
+.equ	a0l	pa0l*(2^30-1)
+.equ	a1l	pa1l*(2^30-1)
+.equ	a2l	pa2l*(2^30-1)
+.equ	b1l	pb1l*(2^30-1)
+.equ	b2l	pb2l*(2^30-1)
+; high-pass
+.equ	pa0h	g*(hpdw0)^2/(1+p*hpdw0+g*(hpdw0)^2)
+.equ	pa1h	-2*pa0h
+.equ	pa2h	pa0h
+.equ	pb1h	-2*pa0h*(1/(g*(hpdw0)^2)-1)
+.equ	pb2h	1-(pa0h-pa1h+pa2h-pb1h)
+; now scale them by 0.5 as some of the coefficients are > 1.0 so scale and compensate when doing the filter below
+; also converting to integer
+.equ	a0h	pa0h*(2^30-1)
+.equ	a1h	pa1h*(2^30-1)
+.equ	a2h	pa2h*(2^30-1)
+.equ	b1h	pb1h*(2^30-1)
+.equ	b2h	pb2h*(2^30-1)
+
+.rn		inc		r0
+.rn		wave	r1
+.rn		offset	r2
+.rn		waveoff	r3
+.rn		samp0	r4
+.rn		samp1	r5
+.rn		temp	r6
+.rn		signal	r7
+.rn		amp_0	r8
+.rn		amp_1	r9
+.rn		amp_2	r10
+.rn		amp_3	r11
+.rn		amp_4	r12
+.rn		amp_5	r13
+
+; these are for the up octaves, the down we are doing with one of the built in pitch shifters
+.rn		wave_1	mr1
+.rn		inc_1	mr2
+.rn		wave_2	mr3
+.rn		inc_2	mr4
+.rn		wave_3	mr5
+.rn		inc_3	mr6
+.rn		wave_4	mr7
+.rn		inc_4	mr8
+.rn		wave_5	mr9
+.rn		inc_5	mr10
+
+; coefficients so pots will range from -inf db to +10 db
+.rn		a_coeff	mr11
+.rn		b_coeff	mr12
+
+; rotary values
+; rotary mregs
+.rn		lxn1		mr13
+.rn		lxn2		mr14
+.rn		lyn1		mr15
+.rn		lyn2		mr16
+.rn		hxn1		mr17
+.rn		hxn2		mr18
+.rn		hyn1		mr19
+.rn		hyn2		mr20
+.rn		rotary_r	mr21
+.rn		rotary_l	mr22
+
+
+.mem	delay1	4096	; delay line for harmonic generation
+.mem	horndel	round(0.0011875*fs)		; horn delay line
+.mem	drumdel	round(0.001104167*fs)		; drum delay line
+
+; coefficients to generate harmonics, do not change
+.mreg	inc_1	0x00200000	; 2nd harmonic (2x)
+.mreg	inc_2	0x00400000	; 3rd harmonic (3x)
+.mreg	inc_3	0x00600000	; 4th harmonic (4x)
+.mreg	inc_4	0x00800000	; 5nd harmonic (5x)
+.mreg	inc_5	0x00a00000	; 6th harmonic (6x)
+
+; coefficients for the POTS to make them range -inf to +10db
+.mreg	a_coeff	0.79
+.mreg	b_coeff	0.83
+
+; set the lfos to the dessired speed
+.sreg	lfo0_f	(2*pi()*f_rotary)/fs
+.sreg	lfo1_f	dhratio*(2*pi()*f_rotary)/fs
+
+; for octave down use one of the pitch shifters
+.sreg	ramp0_f 524288
+
+; needed to calculate harmonics, do not change
+.creg	offset	0x40000000
+.creg	waveoff	0x80000000
+
+; get each pot and save the scaled value
+cpy_cs	amp_0, pot0_smth
+log2	amp_0			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_0, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+cpy_cs	amp_1, pot1_smth
+log2	amp_1			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_1, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+cpy_cs	amp_2, pot2_smth
+log2	amp_2			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_2, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+cpy_cs	amp_3, pot3_smth
+log2	amp_3			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_3, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+cpy_cs	amp_4, pot4_smth
+log2	amp_4			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_4, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+cpy_cs	amp_5, pot5_smth
+log2	amp_5			; log2(POT)
+cpy_cm	temp, b_coeff
+multrr	acc32, temp		; *b_coeff
+sls		acc32, 1		; *2
+exp2	acc32			; exp2()
+cpy_cm	temp, a_coeff	
+multrr	acc32, temp		; *a_coeff
+cpy_cc	amp_5, acc32	; we save it here, will multiply by signal then by 4 to get final
+
+
+; get and store delay
+cpy_cs	acc32, in0
+wrdel	delay1, acc32
+cpy_cc	signal, acc32
+
+; octave down using a ramp
+pitch	rmp0|l4096, delay1
+multrr	amp_0, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 1
+cpy_cm	wave, wave_1
+cpy_cm	inc, inc_1
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_1, acc32	; save it back
+sra		acc32, 1 		; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+; shift to lower bits
+sr		acc32, 20
+; add delay base
+addi	acc32, delay1
+; read from line and save
+rddelx	samp0, acc32
+
+; generate second sample by adding 1/2
+add		wave, waveoff
+sra		acc32, 1 		; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+; shift to lower bits
+sr		acc32, 20
+; add delay base
+addi	acc32, delay1
+; read from line and save
+rddelx	samp1, acc32
+
+; crossfade for samp1 is abs of wave
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+;
+multrr	amp_1, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+
+; calculate wave 2
+cpy_cm	wave, wave_2
+cpy_cm	inc, inc_2
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_2, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+multrr	amp_2, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 3
+cpy_cm	wave, wave_3
+cpy_cm	inc, inc_3
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_3, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+multrr	amp_3, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 4
+cpy_cm	wave, wave_4
+cpy_cm	inc, inc_4
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_4, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+multrr	amp_4, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; calculate wave 5
+cpy_cm	wave, wave_5
+cpy_cm	inc, inc_5
+sub		wave, inc		; down ramp, subtract increment vslue
+cpy_cc	wave, acc32
+cpy_mc	wave_5, acc32	; save it back
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp0, acc32
+add		wave, waveoff
+sra		acc32, 1 			; /2
+adds	offset, acc32	; add 1/2 so ranges 0 to 1.0
+sr		acc32, 20
+addi	acc32, delay1
+rddelx	samp1, acc32
+abs		wave
+cpy_cc	temp, acc32
+subs	samp1, samp0
+multrr	acc32, temp
+adds	samp0, acc32
+multrr	amp_5, acc32
+sls		acc32, 2
+adds	signal, acc32
+cpy_cc	signal, acc32
+
+; having generated all the harmonics we waht to go through a simple rotary speaker effect
+; we have fixed speed and depth but user could use switches to select speed and depth
+; or even drop the 2 top harmonics to use POTS for them. 
+
+; read input, filter and write to delay lines
+; 2-pole low pass
+clracc64
+cpy_cm	temp, lyn2
+wrdld	acc32, b2l>>16
+ori		acc32, b2l&0xffff
+machrr	acc32, temp
+cpy_cm	temp, lyn1
+wrdld 	acc32, b1l>>16
+ori		acc32, b1l&0xffff
+machrr	acc32, temp
+cpy_mc	lyn2, temp              ; save y[n-1] to y[n-2]
+cpy_cm	temp, lxn2
+wrdld	acc32, a2l>>16
+ori		acc32, a2l&0xffff
+machrr	acc32, temp
+cpy_cm	temp, lxn1
+wrdld	acc32, a1l>>16
+ori		acc32, a1l&0xffff
+machrr	acc32, temp
+cpy_mc	lxn2, temp              ; save x[n-1] to x[n-2]
+cpy_cc	temp, signal
+wrdld	acc32, a0l>>16
+ori		acc32, a0l&0xffff
+machrr	acc32, temp
+cpy_mc	lxn1, temp              ; save x[n] to x[n-1]
+sat64	acc32
+sls		acc32, 1                ; since coeffs were scaled by 0.5 multiply by 2
+cpy_mc	lyn1, acc32             ; save to y[n-1] for next time
+wrdel	drumdel, acc32          ; write to drum delay
+; 2-pole high pass
+clracc64
+cpy_cm	temp, hyn2
+wrdld	acc32, b2h>>16
+ori		acc32, b2h&0xffff
+machrr	acc32, temp
+cpy_cm	temp, hyn1
+wrdld	acc32, b1h>>16
+ori		acc32, b1h&0xffff
+machrr	acc32, temp
+cpy_mc	hyn2, temp              ; save y[n-1] to y[n-2]
+cpy_cm	temp, hxn2
+wrdld	acc32, a2h>>16
+ori		acc32, a2h&0xffff
+machrr	acc32, temp
+cpy_cm	temp, hxn1
+wrdld	acc32, a1h>>16
+ori		acc32, a1h&0xffff
+machrr	acc32, temp
+cpy_mc	hxn2, temp              ; save x[n-1] to x[n-2]
+cpy_cc	temp, signal
+wrdld	acc32, a0h>>16
+ori		acc32, a0h&0xffff
+machrr	acc32, temp
+cpy_mc	hxn1, temp              ; save x[n] to x[n-1]
+sat64	acc32
+sls		acc32, 1                ; since coeffs were scaled by 0.5 multiply by 2
+cpy_mc	hyn1, acc32             ; save to y[n-1] for next time
+wrdel	horndel, acc32          ; write to horn delay
+
+; at this point the input has been filtered through the xover
+; and written to the proper delay lines. Now modulate the lines with
+; a chorus and use that to also modulate the amplitude.
+; Since horn goes CCW we want to hear it from left first then right so
+; the left is modulated by COS as it leads SIN so right is SIN
+;
+wrdld	r15, horndel!
+chr		lfo0|COS, horndel
+cpy_cc	temp, acc32             ; put chorused value to the side for now
+cpy_cs	acc32, lfo0_c           ; get raw COS lfo
+sra		acc32, 1                ; divide by 2 fso +/-0.5
+addsi	acc32, 0.5              ; add 0.5 so ranges 0 to 1.0
+multrr	acc32, temp             ; multiply amplitude
+cpy_mc	rotary_l, acc32         ; put out on left
+chr		lfo0|SIN, horndel
+cpy_cc	temp, acc32             ; put chorused value to the side for now
+cpy_cs	acc32, lfo0_s           ; get raw SIN lfo
+sra		acc32, 1                ; divide by 2 fso +/-0.5
+addsi	acc32, 0.5              ; add 0.5 so ranges 0 to 1.0
+multrr	acc32, temp             ; multiply amplitude
+cpy_mc	rotary_r, acc32         ; put out on right
+;
+; now the drum, opposite direction
+wrdld	r15, drumdel!
+chr		lfo0|COS, drumdel
+cpy_cc	temp, acc32             ; put chorused value to the side for now
+cpy_cs	acc32, lfo0_c           ; get raw COS lfo
+sra		acc32, 1                ; divide by 2 fso +/-0.5
+addsi	acc32, 0.5              ; add 0.5 so ranges 0 to 1.0
+multrr	acc32, temp             ; multiply amplitude
+cpy_cm	temp, rotary_r
+adds	temp, acc32         ; add to right
+cpy_mc	rotary_r, acc32
+chr		lfo0|SIN, drumdel
+cpy_cc	temp, acc32             ; put chorused value to the side for now
+cpy_cs	acc32, lfo0_s           ; get raw SIN lfo
+sra		acc32, 1                ; divide by 2 fso +/-0.5
+addsi	acc32, 0.5              ; add 0.5 so ranges 0 to 1.0
+multrr	acc32, temp             ; multiply amplitude
+cpy_cm	temp, rotary_l
+adds	temp, acc32         ; add to left
+cpy_mc	rotary_l, acc32
+
+; finally mix the dry and wet signals
+cpy_cm	temp, rotary_l
+multri	temp, wet
+cpy_cc	temp, acc32
+multri	signal, dry
+adds	acc32, temp
+cpy_sc	out0, acc32
+
+cpy_cm	temp, rotary_r
+multri	temp, wet
+cpy_cc	temp, acc32
+multri	signal, dry
+adds	acc32, temp
+cpy_sc	out1, acc32
