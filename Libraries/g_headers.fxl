@@ -48,4 +48,435 @@
 			.equ      e2     exp(1)
 		</code>
 	</sub>
+	<sub>
+		<name>tuner</name>
+		<type>header</type>
+		<desc>tuner test</desc>
+		<code>
+; ============================================================
+; FXCore switch-select Goertzel guitar tuner
+; SW0-SW2 (3 bits, 0-7) pick which of 6 strings to tune; codes
+; 6 and 7 are ignored. A single Goertzel resonator runs against
+; the selected string's target frequency; its phase residual
+; (vs. the known, deterministic expected rotation) drives USER0
+; (flat) / USER1 (sharp) blink rate -- faster blink = closer to
+; in tune, both LEDs together = locked in.
+;
+; Change FS below to port to a different sample rate; every
+; trig constant is recalculated by the assembler at build time.
+; ============================================================
+
+; ---------------- Sample-rate configuration ----------------
+.equ    FS          32000
+
+; block length in samples between phase comparisons (power of 2
+; so the input prescale below is an exact shift, not a multiply)
+.equ    N_SHIFT     7
+.equ    N           (FS >> N_SHIFT)
+
+; input prescale to keep the undamped Goertzel state comfortably
+; inside S.31 range over a full block
+.equ    ATTEN_SHIFT (N_SHIFT + 1)
+
+; ---------------- Standard tuning targets ----------------
+.equ    F0 82.4069     ; E2  (switch code 0)
+.equ    F1 110.0000    ; A2  (switch code 1)
+.equ    F2 146.8324    ; D3  (switch code 2)
+.equ    F3 195.9977    ; G3  (switch code 3)
+.equ    F4 246.9417    ; B3  (switch code 4)
+.equ    F5 329.6276    ; E4  (switch code 5)
+
+; ---------------- Per-string trig constants ----------------
+.equ    W0    (2*pi()*F0/FS)
+.equ    COSW0 cos(W0)
+.equ    SINW0 sin(W0)
+.equ    EPH0  (W0*N)
+.equ    ECOS0 cos(EPH0)
+.equ    ESIN0 sin(EPH0)
+
+.equ    W1    (2*pi()*F1/FS)
+.equ    COSW1 cos(W1)
+.equ    SINW1 sin(W1)
+.equ    EPH1  (W1*N)
+.equ    ECOS1 cos(EPH1)
+.equ    ESIN1 sin(EPH1)
+
+.equ    W2    (2*pi()*F2/FS)
+.equ    COSW2 cos(W2)
+.equ    SINW2 sin(W2)
+.equ    EPH2  (W2*N)
+.equ    ECOS2 cos(EPH2)
+.equ    ESIN2 sin(EPH2)
+
+.equ    W3    (2*pi()*F3/FS)
+.equ    COSW3 cos(W3)
+.equ    SINW3 sin(W3)
+.equ    EPH3  (W3*N)
+.equ    ECOS3 cos(EPH3)
+.equ    ESIN3 sin(EPH3)
+
+.equ    W4    (2*pi()*F4/FS)
+.equ    COSW4 cos(W4)
+.equ    SINW4 sin(W4)
+.equ    EPH4  (W4*N)
+.equ    ECOS4 cos(EPH4)
+.equ    ESIN4 sin(EPH4)
+
+.equ    W5    (2*pi()*F5/FS)
+.equ    COSW5 cos(W5)
+.equ    SINW5 sin(W5)
+.equ    EPH5  (W5*N)
+.equ    ECOS5 cos(EPH5)
+.equ    ESIN5 sin(EPH5)
+
+; ---------------- LED timing (direct sample counts, since
+; blinkCnt decrements once per SAMPLE, not once per block) ----
+.equ    PERIOD_LOCK ceiling(FS/12)
+.equ    PERIOD_FAST ceiling(FS/8)
+.equ    PERIOD_MED  ceiling(FS/4)
+.equ    PERIOD_SLOW ceiling(FS/2)
+
+; ---------------- thresholds (S.15 range, fraction of mag_sq) ----------------
+.equ    THRESH_LOCK 0.02
+.equ    THRESH_FAST 0.06
+.equ    THRESH_MED  0.15
+
+; noise floor, S.15 range -- tune by ear/scope once running
+.equ    NOISE_FLOOR 0.0005
+
+; ---------------- MREG table layout ----------------
+; per string, STRIDE=4, base = idx*4:
+;  +0 cos_w  +1 sin_w  +2 exp_cos  +3 exp_sin
+.equ    STRIDE 4
+
+; ---------------- register aliases ----------------
+.rn     t0         r0
+.rn     t1         r1
+.rn     t2         r2
+.rn     t3         r3
+.rn     t4         r4
+.rn     t5         r5          ; holds x_in during prescale/recursion/
+                                ; passthrough; free scratch after that
+.rn     s1         r6
+.rn     s2         r7
+.rn     prev_real  r8
+.rn     prev_imag  r9
+.rn     curString  r10
+.rn     blockCnt   r11
+.rn     blinkCnt   r12
+.rn     period     r13
+.rn     blinkState r14
+.rn     errval     r15
+
+; ---------------- initial register values ----------------
+; N and the PERIOD_* constants are plain integers we want stored
+; as literal raw bits. "value/(2^31-2)" is the confirmed-working
+; way to do that: the assembler's normal fractional encode
+; (multiply by 2^31) lands back on the original integer, whereas
+; the ">>31" bit-shift form silently produced 0 for every value
+; we tried -- do not use ">>31" for this anywhere in this file.
+.creg   blockCnt   (N/(2^31-2))
+.creg   blinkCnt   (1/(2^31-2))
+.creg   period     (PERIOD_SLOW/(2^31-2))
+.creg   blinkState 0
+.creg   curString  0
+.creg   s1         0
+.creg   s2         0
+.creg   prev_real  0
+.creg   prev_imag  0
+
+; ---------------- initial MREG values ----------------
+.mreg   mr0  COSW0
+.mreg   mr1  SINW0
+.mreg   mr2  ECOS0
+.mreg   mr3  ESIN0
+
+.mreg   mr4  COSW1
+.mreg   mr5  SINW1
+.mreg   mr6  ECOS1
+.mreg   mr7  ESIN1
+
+.mreg   mr8  COSW2
+.mreg   mr9  SINW2
+.mreg   mr10 ECOS2
+.mreg   mr11 ESIN2
+
+.mreg   mr12 COSW3
+.mreg   mr13 SINW3
+.mreg   mr14 ECOS3
+.mreg   mr15 ESIN3
+
+.mreg   mr16 COSW4
+.mreg   mr17 SINW4
+.mreg   mr18 ECOS4
+.mreg   mr19 ESIN4
+
+.mreg   mr20 COSW5
+.mreg   mr21 SINW5
+.mreg   mr22 ECOS5
+.mreg   mr23 ESIN5
+
+; ============================================================
+; Per-sample: prescale input
+; ============================================================
+    cpy_cs  t5, in0
+    sra     t5, ATTEN_SHIFT
+    cpy_cc  t5, acc32              ; t5 = x_in for this sample
+
+; ============================================================
+; Switch read  string selection
+; ============================================================
+    cpy_cs  t0, SWITCH
+    andi    t0, 0x0007
+    cpy_cc  t0, acc32              ; t0 = raw 3-bit switch value (0-7)
+
+    cpy_cc  t1, curString          ; t1 = previous selection (for
+                                    ; change detection below)
+
+    cpy_cc  t2, t0
+    addi    t2, -6
+    jgez    acc32, keep_string     ; t0 >= 6  out of range, ignore
+    cpy_cc  curString, t0
+keep_string:
+
+    subs    t1, curString
+    jz      acc32, no_reset
+    ; selection changed -- clear Goertzel state and phase history
+    ; so the new string doesn't inherit a stale reading from
+    ; whatever was ringing before
+    xor     t2, t2
+    cpy_cc  t2, acc32
+    cpy_cc  s1, t2
+    cpy_cc  s2, t2
+    cpy_cc  prev_real, t2
+    cpy_cc  prev_imag, t2
+no_reset:
+
+; ============================================================
+; Fetch selected string's cos_w (base = curString*4, offset +0)
+; ============================================================
+    cpy_cc  t3, curString
+    sl      t3, 2
+    cpy_cc  t3, acc32              ; t3 = base (also reused below)
+    cpy_cmx t4, t3                 ; t4 = cos_w
+
+; ============================================================
+; Goertzel recursion
+; ============================================================
+    cpy_cc  t0, s1
+    multrr  t0, t4                 ; ACC32 = s1*cos_w
+    cpy_cc  t0, acc32
+    sls     t0, 1                  ; *2, saturating
+    cpy_cc  t0, acc32
+    adds    t0, t5                 ; + x_in
+    cpy_cc  t0, acc32
+    subs    t0, s2                 ; - s2  new s0
+    cpy_cc  t0, acc32
+    cpy_cc  t1, s1                 ; save old s1 before overwrite
+    cpy_cc  s2, t1                 ; s2  old s1
+    cpy_cc  s1, t0                 ; s1  new s0
+
+; ============================================================
+; Audio passthrough
+; ============================================================
+    cpy_sc  out0, t5
+    cpy_sc  out1, t5
+
+; ============================================================
+; Block-boundary test -- forward-skip block-combine + LED
+; parameter section unless this is the Nth sample
+; ============================================================
+    addi    blockCnt, -1
+    cpy_cc  blockCnt, acc32
+    jnz     blockCnt, epilogue
+    addi    blockCnt, N
+    cpy_cc  blockCnt, acc32
+
+; ============================================================
+; Block-combine (single filter -- the selected string)
+; ============================================================
+    ; real = s1 - s2*cos_w   (t4 still holds cos_w, untouched
+    ; since the fetch above)
+    cpy_cc  t0, s2
+    multrr  t0, t4
+    cpy_cc  t0, acc32
+    cpy_cc  t1, s1
+    subs    t1, t0
+    cpy_cc  t1, acc32              ; t1 = real
+
+    ; sin_w fetch (base+1); t3 still = base
+    cpy_cc  t0, t3
+    addi    t0, 1
+    cpy_cc  t0, acc32
+    cpy_cmx t2, t0                 ; t2 = sin_w
+    cpy_cc  t0, s2
+    multrr  t0, t2
+    cpy_cc  t2, acc32              ; t2 = imag (sin_w no longer
+                                    ; needed, reuse)
+
+    ; reset Goertzel state for next block
+    xor     t0, t0
+    cpy_cc  t0, acc32
+    cpy_cc  s1, t0
+    cpy_cc  s2, t0
+
+    ; magnitude^2
+    cpy_cc  t0, t1
+    multrr  t0, t1
+    cpy_cc  t0, acc32
+    multrr  t2, t2
+    adds    t0, acc32
+    cpy_cc  t4, acc32              ; t4 = mag_sq (cos_w no longer
+                                    ; needed, reuse)
+
+    ; noise floor gate
+    addsi   t4, -NOISE_FLOOR
+    jneg    acc32, led_quiet
+
+    ; exp_cos fetch (base+2)
+    cpy_cc  t0, t3
+    addi    t0, 2
+    cpy_cc  t0, acc32
+    cpy_cmx t5, t0                 ; t5 = exp_cos (x_in's job is
+                                    ; done for this sample, reuse)
+
+    ; exp_sin fetch (base+3) -- t3 no longer needed after this,
+    ; safe to destroy
+    addi    t3, 3
+    cpy_cc  t3, acc32
+    cpy_cmx t0, t3                 ; t0 = exp_sin
+
+    ; predicted vector = prev * exp(j*expected_phase)
+    ; s1/s2 were just zeroed above and aren't touched again until
+    ; next sample's recursion, so they're borrowed here as extra
+    ; scratch (re-zeroed again below before falling through)
+    cpy_cc  t3, prev_real
+    multrr  t3, t5                 ; prev_real*exp_cos
+    cpy_cc  s1, acc32
+
+    cpy_cc  t3, prev_imag
+    multrr  t3, t0                 ; prev_imag*exp_sin
+    cpy_cc  s2, acc32
+
+    subs    s1, s2
+    cpy_cc  s1, acc32              ; s1 = pred_real
+
+    cpy_cc  t3, prev_real
+    multrr  t3, t0                 ; prev_real*exp_sin
+    cpy_cc  s2, acc32
+
+    cpy_cc  t3, prev_imag
+    multrr  t3, t5                 ; prev_imag*exp_cos
+    cpy_cc  t3, acc32
+
+    adds    s2, t3
+    cpy_cc  s2, acc32              ; s2 = pred_imag
+
+    ; error (only imag part needed): err = imag*pred_real - real*pred_imag
+    multrr  t2, s1                 ; imag*pred_real
+    cpy_cc  t3, acc32
+    multrr  t1, s2                 ; real*pred_imag
+    subs    t3, acc32
+    cpy_cc  errval, acc32          ; latch err_imag
+
+    ; update phase history for next block
+    cpy_cc  prev_real, t1
+    cpy_cc  prev_imag, t2
+
+    ; re-zero s1/s2 (Goertzel state) after borrowing them above
+    xor     s1, s1
+    cpy_cc  s1, acc32
+    xor     s2, s2
+    cpy_cc  s2, acc32
+
+; ============================================================
+; LED parameter stage -- threshold ladder, largest first
+; ============================================================
+    abs     errval
+    cpy_cc  t0, acc32              ; t0 = |err_imag|
+
+    multri  t4, THRESH_LOCK
+    cpy_cc  t1, acc32
+    subs    t0, t1
+    jgez    acc32, led_chkfast
+    xor     t1, t1
+    cpy_cc  t1, acc32
+    addi    t1, PERIOD_LOCK
+    cpy_cc  period, acc32
+    jmp     led_dir
+led_chkfast:
+    multri  t4, THRESH_FAST
+    cpy_cc  t1, acc32
+    subs    t0, t1
+    jgez    acc32, led_chkmed
+    xor     t1, t1
+    cpy_cc  t1, acc32
+    addi    t1, PERIOD_FAST
+    cpy_cc  period, acc32
+    jmp     led_dir
+led_chkmed:
+    multri  t4, THRESH_MED
+    cpy_cc  t1, acc32
+    subs    t0, t1
+    jgez    acc32, led_slow
+    xor     t1, t1
+    cpy_cc  t1, acc32
+    addi    t1, PERIOD_MED
+    cpy_cc  period, acc32
+    jmp     led_dir
+led_slow:
+    xor     t1, t1
+    cpy_cc  t1, acc32
+    addi    t1, PERIOD_SLOW
+    cpy_cc  period, acc32
+
+led_dir:
+    jmp     led_done
+
+led_quiet:
+    ; too quiet -- park on the slow rate; s1/s2 are already 0
+    ; here since the reset above ran before this branch point
+    xor     t1, t1
+    cpy_cc  t1, acc32
+    addi    t1, PERIOD_SLOW
+    cpy_cc  period, acc32
+
+led_done:
+
+; ============================================================
+; Per-sample epilogue -- blink toggle, runs every sample
+; ============================================================
+epilogue:
+    addi    blinkCnt, -1
+    cpy_cc  blinkCnt, acc32
+    jnz     blinkCnt, sample_end
+    cpy_cc  blinkCnt, period
+    xori    blinkState, 1
+    cpy_cc  blinkState, acc32
+
+    ; in-tune (period == PERIOD_LOCK)  both LEDs together
+    cpy_cc  t0, period
+    addi    t0, -PERIOD_LOCK
+    jnz     acc32, ep_notlocked
+    set     user0|0, blinkState
+    set     user1|0, blinkState
+    jmp     sample_end
+ep_notlocked:
+    jneg    errval, ep_isflat
+    xor     t0, t0
+    cpy_cc  t0, acc32
+    set     user0|0, t0
+    set     user1|0, blinkState
+    jmp     sample_end
+ep_isflat:
+    xor     t0, t0
+    cpy_cc  t0, acc32
+    set     user1|0, t0
+    set     user0|0, blinkState
+
+sample_end:
+    and     acc32, acc32
+
+		</code>
+	</sub>
 </library>
